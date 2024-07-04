@@ -1,3 +1,4 @@
+from typing import List
 # defining wires
 class Wire:
     def __init__(self, value: int, bit_count: int) -> None:
@@ -93,9 +94,24 @@ class Wire:
         for _ in range(other - 1):
             result = result.concat(self)
         return result
-    
+
     def concat(self, other):
         return Wire((self.value << other.bit_count) | other.value, self.bit_count + other.bit_count)
+
+    def __floordiv__(self, other):
+        self.concat(other)
+
+    def reverse(self):
+        mask = 1 << (self.bit_count - 1)  # Mask to isolate the MSB
+        while mask > 0:
+            msb = self.value & mask
+            self.value = self.value ^ msb
+            self.value = self.value << 1
+            self.value = self.value | msb
+            mask >>= 1
+        return self
+
+
 
 
 def MUX(data_lines: list[Wire], select_lines: Wire) -> Wire:
@@ -112,8 +128,52 @@ def SubPos(a: Wire, b: Wire) -> Wire:
     b, s = a - b
     return MUX([a, s], ~b)
 
+
 def IntSqrt(input: Wire) -> Wire:
-    pass # TODO: Implement integer square root
+    n = input.bit_count
+    m = n // 2
+
+    groups = []
+    if n % 2 == 0:
+        for i in range(0,n,2):
+            groups.append(input[i:i+1])
+    else:
+        for i in range(0,n-1,2):
+            groups.append(input[i:i+1])
+
+        groups.append(Wire(0,1) // (input[n-1]))
+        # Initialize the output bits
+        q = [Wire(0, 1) for _ in range(m)]
+        for i in range(m-1,-1,-1):
+            last_half_groups = groups[-len(q):]
+            last_half_q = q[-len(last_half_groups):]
+            for group, q_bit in zip(last_half_groups, last_half_q):
+                if group.value >= q_bit.value << (group.bit_count - q_bit.bit_count - 1):
+                    groups[m-1:i] = SubPos(groups[m-1:i],q[m-1:i+1]//Wire(0b01,2))# FIXME: implement the sudocode provided in the pdf
+                    q[i] = Wire(1,1)
+                else:
+                    q[i] = Wire(0,1)
+
+    """the previous code:Iterate over each group and each bit position in reverse order
+    
+    for i in range(m - 1, -1, -1):
+        for j in range(len(groups) - 1, -1, -1):
+            # Update the output bits
+            if groups[j].value >= output_bits[i].value << (j * m):
+                groups[j] = SubPos(groups[j], output_bits[i])
+                output_bits[i] = Wire(1, 1)
+            else:
+                output_bits[i] = Wire(0, 1)"""
+
+
+    """for i in range(m - 1, -1, -2):
+        output = Wire.concat(output_bits[i], output_bits[i-1])
+
+    return output"""
+
+
+
+
 
 # Test cases
 a = Wire(0b1011, 4)
@@ -124,4 +184,6 @@ print(a[0:3])
 print(a - b)  # 5
 print(a + b)  # 15
 print(a.concat(b))  # 0b10100101
+print("HI")
+print(IntSqrt(Wire(0b0001,4))) #0b0010
 print(MUX([a, b], Wire(0, 1)))  # 0b1010
