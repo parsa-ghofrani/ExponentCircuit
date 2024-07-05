@@ -102,16 +102,13 @@ class Wire:
         self.concat(other)
 
     def reverse(self):
-        mask = 1 << (self.bit_count - 1)  # Mask to isolate the MSB
-        while mask > 0:
-            msb = self.value & mask
-            self.value = self.value ^ msb
-            self.value = self.value << 1
-            self.value = self.value | msb
-            mask >>= 1
-        return self
-
-
+        value = self.value
+        binary = bin(value)[2:]
+        reversed_bin = binary[::-1]
+        num_of_zeros = self.bit_count - len(reversed_bin)
+        reversed_bin += '0'*num_of_zeros
+        reversed_bin = int(reversed_bin, 2)
+        return Wire(reversed_bin, self.bit_count)
 
 
 def MUX(data_lines: list[Wire], select_lines: Wire) -> Wire:
@@ -179,11 +176,10 @@ def IntSqrt(input: Wire) -> Wire:
 a = Wire(0b1011, 4)
 b = Wire(0b0101, 4)
 print(a)
+print(a.reverse()) # 0b1101
 print(a[-4])
 print(a[0:3])
 print(a - b)  # 5
 print(a + b)  # 15
 print(a.concat(b))  # 0b10100101
-print("HI")
-print(IntSqrt(Wire(0b0001,4))) #0b0010
 print(MUX([a, b], Wire(0, 1)))  # 0b1010
