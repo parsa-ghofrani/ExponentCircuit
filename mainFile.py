@@ -26,9 +26,29 @@ class Wire:
         elif isinstance(key, slice): # TODO: implement slice for negative values
             start = key.start or 0
             stop = key.stop or (self.bit_count + 1)
-            stop -= 1
             mask = (1 << (stop - start)) - 1
             return Wire((self.value >> start) & mask, stop - start)
+    
+
+    def __setitem__(self, key, value):
+        if not isinstance(value, Wire):
+            raise ValueError("Value must be a Wire instance")
+        if isinstance(key, int):
+            if key < 0:
+                key += self.bit_count
+            if key < 0 or key >= self.bit_count:
+                raise IndexError("Wire index out of range")
+            if value.value == 1:
+                self.value |= (1 << key)
+            else:
+                self.value &= ~(1 << key)
+        elif isinstance(key, slice):
+            start = key.start or 0
+            stop = key.stop or (self.bit_count + 1)
+            mask = (1 << (stop - start)) - 1
+            self.value = (self.value & ~(mask << start)) | (value.value << start)
+        else:
+            raise TypeError("Invalid argument type")
     
     def __and__(self, other):
         if isinstance(other, Wire):
@@ -83,6 +103,10 @@ class Wire:
         a = self
         b = other if isinstance(other, Wire) else Wire(other, a.bit_count)
         n = max(a.bit_count, b.bit_count)
+        if a.bit_count < b.bit_count:
+            a = Wire(0, b.bit_count - a.bit_count) // a
+        elif b.bit_count < a.bit_count:
+            b = Wire(0, a.bit_count - b.bit_count) // b
         result = Wire(0, n)
         borrow = Wire(0, 1)
 
@@ -102,8 +126,8 @@ class Wire:
     def concat(self, other):
         return Wire((self.value << other.bit_count) | other.value, self.bit_count + other.bit_count)
 
-    def __floordiv__(self, other):
-        self.concat(other)
+    def __floordiv__(self, other): # // is concatenation
+        return self.concat(other)
 
     def reverse(self):
         value = self.value
@@ -158,11 +182,14 @@ def MUX(data_lines: list[Wire], select_lines: Wire) -> Wire:
     return output
 
 def SubPos(a: Wire, b: Wire) -> Wire:
-    b, s = a - b
-    return MUX([a, s], ~b)
+    borrow, s = a - b
+    return ~borrow, MUX([s, a], borrow)
 
 
 def IntSqrt(input: Wire) -> Wire:
+    if input.bit_count % 2 == 1:
+        input = Wire(0,1) // input
+
     n = input.bit_count
     m = n // 2
 
@@ -176,16 +203,20 @@ def IntSqrt(input: Wire) -> Wire:
             pre_layer = pre_layer // input[2*i : 2*i + 2]
             q[i], pre_layer = SubPos(pre_layer, q[i+1:m] // Wire(0b01,2))
 
-    
     return q
 
 def FracSqrt(input: Wire) -> Wire:
     return IntSqrt(input // Wire(0, input.bit_count))
 
-def FloatSqrt(input: Wire) -> Wire:
-    S = input[0]
-    E = input[1:9]
-    F = input[9:32]
+def FloatSqrt(input: FloatWire) -> Wire:
+    S = input.sign()
+    E = input.exponent()
+    F = input.fraction()
+    e = input.e
+    f = input.f
+    bias = input.bias
+
+    # TODO: Implement the floating point square root algorithm
 
 
 
