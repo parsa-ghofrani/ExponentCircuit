@@ -1,6 +1,10 @@
 from typing import List
+import struct
 # defining wires
 class Wire:
+    value: int
+    bit_count: int
+
     def __init__(self, value: int, bit_count: int) -> None:
         self.value = value
         self.bit_count = bit_count
@@ -109,6 +113,38 @@ class Wire:
         reversed_bin += '0' * num_of_zeros
         reversed_bin = int(reversed_bin, 2)
         return Wire(reversed_bin, self.bit_count)
+    
+class FloatWire(Wire):
+    f: int
+    e: int
+    bias: int
+
+    def __init__(self, value: int, e: int = 8, f: int = 23, bias: int = 127) -> None:
+        Wire.__init__(self, value, e + f + 1)
+        self.e = e
+        self.f = f
+        self.bias = bias
+    
+    def __repr__(self):
+        return f"0b{self.value:0{self.bit_count}b}"
+    
+    def sign(self):
+        return self[-1]
+    
+    def exponent(self):
+        return self[self.f:self.bit_count - 1]
+    
+    def fraction(self):
+        return self[0:self.f]
+    
+    def to_float(self):
+        sign = (-1) ** self.sign().value
+        exponent = self.exponent().value - self.bias
+        fraction = 1 + self.fraction().value / (1 << self.f)
+        return sign * fraction * 2 ** exponent
+
+
+
 
 
 def MUX(data_lines: list[Wire], select_lines: Wire) -> Wire:
@@ -130,43 +166,26 @@ def IntSqrt(input: Wire) -> Wire:
     n = input.bit_count
     m = n // 2
 
-    groups = []
-    if n % 2 == 0:
-        for i in range(0,n,2):
-            groups.append(input[i:i+1])
-    else:
-        for i in range(0,n-1,2):
-            groups.append(input[i:i+1])
+    # Initialize the output bits
+    q = Wire(0, m)
+    pre_layer = input[n-2:n] # last two bits
+    for i in range(m-1, -1, -1):
+        if i == m - 1:
+            q[i], pre_layer = SubPos(pre_layer, Wire(0b01,2))
+        else:
+            pre_layer = pre_layer // input[2*i : 2*i + 2]
+            q[i], pre_layer = SubPos(pre_layer, q[i+1:m] // Wire(0b01,2))
 
-        groups.append(Wire(0,1) // (input[n-1]))
-        # Initialize the output bits
-        q = [Wire(0, 1) for _ in range(m)]
-        for i in range(m-1,-1,-1):
-            last_half_groups = groups[-len(q):]
-            last_half_q = q[-len(last_half_groups):]
-            for group, q_bit in zip(last_half_groups, last_half_q):
-                if group.value >= q_bit.value << (group.bit_count - q_bit.bit_count - 1):
-                    groups[m-1:i] = SubPos(groups[m-1:i],q[m-1:i+1]//Wire(0b01,2))# FIXME: implement the sudocode provided in the pdf
-                    q[i] = Wire(1,1)
-                else:
-                    q[i] = Wire(0,1)
-
-    """the previous code:Iterate over each group and each bit position in reverse order
     
-    for i in range(m - 1, -1, -1):
-        for j in range(len(groups) - 1, -1, -1):
-            # Update the output bits
-            if groups[j].value >= output_bits[i].value << (j * m):
-                groups[j] = SubPos(groups[j], output_bits[i])
-                output_bits[i] = Wire(1, 1)
-            else:
-                output_bits[i] = Wire(0, 1)"""
+    return q
 
+def FracSqrt(input: Wire) -> Wire:
+    return IntSqrt(input // Wire(0, input.bit_count))
 
-    """for i in range(m - 1, -1, -2):
-        output = Wire.concat(output_bits[i], output_bits[i-1])
-
-    return output"""
+def FloatSqrt(input: Wire) -> Wire:
+    S = input[0]
+    E = input[1:9]
+    F = input[9:32]
 
 
 
@@ -175,11 +194,50 @@ def IntSqrt(input: Wire) -> Wire:
 # Test cases
 a = Wire(0b1011, 4)
 b = Wire(0b0101, 4)
-print(a)
-print(a.reverse()) # 0b1101
-print(a[-4])
-print(a[0:3])
-print(a - b)  # 5
-print(a + b)  # 15
-print(a.concat(b))  # 0b10100101
-print(MUX([a, b], Wire(0, 1)))  # 0b1010
+print(f'{a = }')
+print(f'{a[-4] = }')
+print(f'{a[0:3] = }')
+print(f'{a - b = }')  # 5
+print(f'{a + b = }')  # 15
+print(f'{a.concat(b) = }')  # 0b10100101
+
+w = Wire(0b1010, 4)
+print(f'{w = }')  # Wire(value=10, bit_count=4)
+w[2] = Wire(1, 1)
+print(f'w after w[2] <- 1 = {w}')  # Wire(value=2, bit_count=4)
+
+c = Wire(0b101, 3)
+d = Wire(0b1, 1)
+print(f'{c - d = }') # 0b100
+
+print(f'{IntSqrt(Wire(0b1010010100000000,16)) = }') # 0b11001101
+print(f'{MUX([a, b], Wire(0, 1)) = }')  # 0b1010
+
+my_float = -1.35
+"""my_float to single precision"""
+# Step 1: Pack the float into bytes
+packed = struct.pack('!f', my_float)
+
+# Step 2: Unpack the bytes into an integer
+unpacked = struct.unpack('!I', packed)[0]
+
+# Step 3: Convert the integer to a binary string
+binary_string = f'{unpacked:032b}'
+
+print(f'The bits of {my_float} are: {binary_string}')
+
+"""my_float to double precision"""
+# Step 1: Pack the float into bytes (double precision)
+packed = struct.pack('!d', my_float)
+
+# Step 2: Unpack the bytes into a 64-bit integer
+unpacked = struct.unpack('!Q', packed)[0]
+
+# Step 3: Convert the integer to a 64-bit binary string
+binary_string = f'{unpacked:064b}'
+
+print(f'The bits of {my_float} are: {binary_string}')
+
+g = FloatWire(0b10111111101011001100110011001101)
+print(f'{g = }')
+print(f'value of {g} = {g.to_float()}')
