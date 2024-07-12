@@ -26,6 +26,10 @@ class Wire:
         elif isinstance(key, slice): # TODO: implement slice for negative values
             start = key.start or 0
             stop = key.stop or (self.bit_count + 1)
+            if start < 0:
+                start += self.bit_count
+            if stop < 0:
+                stop += self.bit_count
             mask = (1 << (stop - start)) - 1
             return Wire((self.value >> start) & mask, stop - start)
     
@@ -138,16 +142,33 @@ class Wire:
         reversed_bin = int(reversed_bin, 2)
         return Wire(reversed_bin, self.bit_count)
     
+    def multi_bit_nor(self):
+        for i in range(self.bit_count):
+            if self[i].value == 1:
+                return Wire(0, 1)
+        return Wire(1, 1)
+    
+    def SAR(self):
+        is_negative = self[-1]
+        result = self[-1] // self
+        return result >> 1
+    
 class FloatWire(Wire):
     f: int
     e: int
-    bias: int
+    bias: Wire
 
-    def __init__(self, value: int, e: int = 8, f: int = 23, bias: int = 127) -> None:
+    def __init__(self, value: int, e: int = 8, f: int = 23, bias: Wire = Wire(127,8)) -> None:
         Wire.__init__(self, value, e + f + 1)
         self.e = e
         self.f = f
         self.bias = bias
+    
+    # def __init__(self, wire: Wire, e: int = 8, f: int = 23, bias: Wire = Wire(127,8)) -> None:
+    #     Wire.__init__(self, wire.value, e + f + 1)
+    #     self.e = e
+    #     self.f = f
+    #     self.bias = bias
     
     def __repr__(self):
         return f"0b{self.value:0{self.bit_count}b}"
@@ -163,7 +184,7 @@ class FloatWire(Wire):
     
     def to_float(self):
         sign = (-1) ** self.sign().value
-        exponent = self.exponent().value - self.bias
+        exponent = (self.exponent() - self.bias)[1].value
         fraction = 1 + self.fraction().value / (1 << self.f)
         return sign * fraction * 2 ** exponent
 
@@ -208,7 +229,7 @@ def IntSqrt(input: Wire) -> Wire:
 def FracSqrt(input: Wire) -> Wire:
     return IntSqrt(input // Wire(0, input.bit_count))
 
-def FloatSqrt(input: FloatWire) -> Wire:
+def FloatSqrt(input: FloatWire) -> FloatWire:
     S = input.sign()
     E = input.exponent()
     F = input.fraction()
@@ -216,7 +237,14 @@ def FloatSqrt(input: FloatWire) -> Wire:
     f = input.f
     bias = input.bias
 
-    # TODO: Implement the floating point square root algorithm
+    is_zero = (E // F).multi_bit_nor()
+
+    twos_complement_E = (E - bias)[1]
+
+    F_prime = MUX([FracSqrt(MUX([Wire(0b01,2)//F,Wire(1,1)//F//Wire(0,1)],twos_complement_E[0])),Wire(0,f+2)],is_zero)[1:-1]
+    E_prime = MUX([(twos_complement_E.SAR()+bias)[1],Wire(0,e)],is_zero)
+
+    return FloatWire((Wire(0,1) // E_prime // F_prime).value, e, f, bias)
 
 
 
@@ -272,3 +300,21 @@ print(f'The bits of {my_float} are: {binary_string}')
 g = FloatWire(0b10111111101011001100110011001101)
 print(f'{g = }')
 print(f'value of {g} = {g.to_float()}')
+
+print(f'{Wire(0b1010, 4).SAR() = }\n')  # 0b0101
+
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+print(f'{a = } = {a.to_float()}')
+print(f'{FloatSqrt(a) = } = {FloatSqrt(a).to_float()}\n')  # 1.16
+
+b = FloatWire(0b01000001100000000000000000000000) # 16.0
+print(f'{b = } = {b.to_float()}')
+print(f'{FloatSqrt(b) = } = {FloatSqrt(b).to_float()}\n')  # 4.0
+
+c = FloatWire(0b00111111100000000000000000000000) # 1.0
+print(f'{c = } = {c.to_float()}')
+print(f'{FloatSqrt(c) = } = {FloatSqrt(c).to_float()}\n')  # 1.0
+
+d = FloatWire(0b01000000000000000000000000000000) # 2.0
+print(f'{d = } = {d.to_float()}')
+print(f'{FloatSqrt(d) = } = {FloatSqrt(d).to_float()}\n')  # 1.41
