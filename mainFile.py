@@ -121,11 +121,14 @@ class Wire:
 
         return borrow, result
     
-    def __mul__(self, other: int): # concat n times
-        result = self
-        for _ in range(other - 1):
-            result = result.concat(self)
-        return result
+    def __mul__(self, other: int):
+        if isinstance(other, int): # concat n times
+            result = self
+            for _ in range(other - 1):
+                result = result.concat(self)
+            return result
+        else:
+            return IntMul(self, other)
 
     def concat(self, other):
         return Wire((self.value << other.bit_count) | other.value, self.bit_count + other.bit_count)
@@ -246,6 +249,30 @@ def FloatSqrt(input: FloatWire) -> FloatWire:
 
     return FloatWire((Wire(0,1) // E_prime // F_prime).value, e, f, bias)
 
+def IntMul(a: Wire, b: Wire) -> Wire:
+    n = a.bit_count
+    m = b.bit_count
+    output = Wire(0, n + m)
+    for i in range(n):
+        for j in range(m):
+            output = (output + ((a[i] & b[j]) << (i + j)))[1]
+    return output
+
+def FloatMul(a: FloatWire, b: FloatWire) -> FloatWire:
+    S = a.sign() ^ b.sign()
+    bias = a.bias
+    f = a.f
+    
+    mul = (Wire(1,1) // a.fraction()) * (Wire(1,1) // b.fraction())
+    is_F_bigger_than_2 = mul[-1]
+
+    E = (((a.exponent() - bias)[1] + b.exponent())[1] + is_F_bigger_than_2)[1]
+    F = MUX([mul[f:-2], mul[f+1:-1]], is_F_bigger_than_2)
+
+    return FloatWire((S // E // F).value, a.e, a.f, a.bias)
+
+def FloatSquare(a: FloatWire) -> FloatWire:
+    return FloatMul(a,a)
 
 
 
@@ -318,3 +345,14 @@ print(f'{FloatSqrt(c) = } = {FloatSqrt(c).to_float()}\n')  # 1.0
 d = FloatWire(0b01000000000000000000000000000000) # 2.0
 print(f'{d = } = {d.to_float()}')
 print(f'{FloatSqrt(d) = } = {FloatSqrt(d).to_float()}\n')  # 1.41
+
+a = Wire(0b1011, 4)
+b = Wire(0b0101, 4)
+print(f'{IntMul(a, b) = }\n') # 0b00110111
+
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+b = FloatWire(0b01000001100000000000000000000000) # 16.0
+print(f'{FloatMul(a, b) = } = {FloatMul(a, b).to_float()}\n') # 0b00111111101011001100110011001101
+
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+print(f'{FloatSquare(a) = } = {FloatSquare(a).to_float()}') # 1.8224999999999998
