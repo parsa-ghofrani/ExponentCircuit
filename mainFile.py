@@ -276,6 +276,71 @@ def FloatSquare(a: FloatWire) -> FloatWire:
 
 
 
+def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
+    S_a = a.sign()
+    E_a = a.exponent()
+    F_a = a.fraction()
+    e = a.e # bits of exponent
+    f = a.f # bits of fraction
+    bias = a.bias
+    S_b = b.sign()
+    E_b = b.exponent()
+    F_b = b.fraction()
+
+    q = Wire(0,1)//bias//Wire(0, 1)# todo : bit//bias//vector
+
+    E_ = b.to_float() - bias.value
+    if E_ < 0:
+        while E_ < 0:
+            a = FloatSqrt(a)
+            E_ += 1
+            q = FloatMul(a, q) # todo : check this with parsa to see if it is correct (pseudocode wasn't complete)
+    elif  E_ > f:
+        while E_> f:
+            a = FloatSqrt(a)
+            E_ -= 1
+
+        F_reverse = F_b.reverse()
+        for i in F_reverse.digits : # todo : define a function for traversing digits of a given wire
+            a = FloatSqrt(a)
+            q = FloatMul(a, q)
+            if i == 1:
+                q = FloatMul(q, q)
+
+        a = FloatSqrt(a)
+        q = FloatMul(q, q)
+
+    else:
+        a_prime = Squar_Root_Register # todo : check for more explanation
+        F1_prime , F2_prime # todo : check for more explanation
+
+        a_prime = a
+        F1_prime_v = Wire(0,1)//Wire(0,1)//Wire(1,0) # todo : check for more information
+        F2_prime_v = F_b
+        while E_ > 0:
+            F1_prime_v << F2_prime_v
+            E_ -= 1
+            F1_prime = Wire(0,1)
+            F2_prime = Wire(0, 1) # todo : check for more info
+            for i in range(f,1,-1):
+                F1_prime_v >> F1_prime
+                F2_prime_v << F2_prime
+                a = FloatSquare(a)
+                a_prime = FloatSqrt(a_prime)
+                if F1_prime == 1:
+                    q = FloatMul(q,a)
+                if F2_prime == 1:
+                    q = FloatMul(q,a_prime)
+
+    return q
+
+
+
+
+
+
+
+
 
 # Test cases
 a = Wire(0b1011, 4)
