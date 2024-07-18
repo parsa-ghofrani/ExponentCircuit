@@ -1,5 +1,7 @@
 from typing import List
 import struct
+from collections.abc import Callable
+from typing import Union
 # defining wires
 class Wire:
     value: int
@@ -191,6 +193,41 @@ class FloatWire(Wire):
         fraction = 1 + self.fraction().value / (1 << self.f)
         return sign * fraction * 2 ** exponent
 
+registers = []
+def do_clock():
+    for register in registers:
+        register.set_new_value()
+        register.set_new_load()
+    for register in registers:
+        register.update_value()
+
+class Register:
+    global registers
+    value: Wire | FloatWire
+    new_value: Wire | FloatWire
+    load: Wire
+    data_function: Callable[[], Union[Wire, FloatWire]]
+    load_function: Callable[[], Wire]
+
+    def __init__(self, init_value, data_function, load_function) -> None:
+        self.value = init_value
+        self.new_value = init_value
+        self.data_function = data_function
+        self.load_function = load_function
+        registers.append(self)
+        self.load = Wire(0,0)
+    
+    def set_new_value(self):
+        self.new_value = self.data_function()
+
+    def set_new_load(self):
+        self.load = self.load_function()
+    
+    def update_value(self):
+        if self.load.value == 1:
+            self.value = self.new_value
+
+
 
 
 
@@ -311,7 +348,7 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
         q = FloatMul(q, q)
 
     else:
-        a_prime = Squar_Root_Register # todo : check for more explanation
+        a_prime = Square_Root_Register # todo : check for more explanation
         F1_prime , F2_prime # todo : check for more explanation
 
         a_prime = a
@@ -333,13 +370,6 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
                     q = FloatMul(q,a_prime)
 
     return q
-
-
-
-
-
-
-
 
 
 # Test cases
@@ -421,3 +451,18 @@ print(f'{FloatMul(a, b) = } = {FloatMul(a, b).to_float()}\n') # 0b00111111101011
 
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
 print(f'{FloatSquare(a) = } = {FloatSquare(a).to_float()}') # 1.8224999999999998
+
+
+# Test Registers
+a = Register(Wire(0, 4), lambda: Wire(0b1011, 4), lambda: Wire(1, 1))
+b = Register(Wire(0, 4), lambda: a.value, lambda: Wire(1, 1))
+print(f'{a.value = }')
+print(f'{b.value = }')
+do_clock()
+print('Clock()')
+print(f'{a.value = }')
+print(f'{b.value = }')
+do_clock()
+print('Clock()')
+print(f'{a.value = }')
+print(f'{b.value = }')
