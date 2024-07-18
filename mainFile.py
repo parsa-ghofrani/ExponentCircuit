@@ -2,6 +2,7 @@ from typing import List
 import struct
 from collections.abc import Callable
 from typing import Union
+from copy import deepcopy
 # defining wires
 class Wire:
     value: int
@@ -311,6 +312,14 @@ def FloatMul(a: FloatWire, b: FloatWire) -> FloatWire:
 def FloatSquare(a: FloatWire) -> FloatWire:
     return FloatMul(a,a)
 
+def SHL(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
+    result = wire // input_bit
+    return result[-1], result[:-1]
+
+def SHR(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
+    result = input_bit // wire
+    return result[0], result[1:]
+
 
 
 def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
@@ -324,9 +333,9 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
     E_b = b.exponent()
     F_b = b.fraction()
 
-    q = Wire(0,1)//bias//Wire(0, 1)# todo : bit//bias//vector
+    q = FloatWire((Wire(0,1)//bias//Wire(0, f)).value)# todo : bit//bias//vector
 
-    E_ = b.to_float() - bias.value
+    E_ = E_b.value - bias.value
     if E_ < 0:
         while E_ < 0:
             a = FloatSqrt(a)
@@ -348,26 +357,30 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
         q = FloatMul(q, q)
 
     else:
-        a_prime = Square_Root_Register # todo : check for more explanation
-        F1_prime , F2_prime # todo : check for more explanation
+        a_prime: FloatWire
+        F1_prime: Wire
+        F2_prime: Wire
 
-        a_prime = a
-        F1_prime_v = Wire(0,1)//Wire(0,1)//Wire(1,0) # todo : check for more information
-        F2_prime_v = F_b
+        a_prime = deepcopy(a)
+        F1_prime = Wire(1, f)
+        F2_prime = deepcopy(F_b)
         while E_ > 0:
-            F1_prime_v << F2_prime_v
+            # F1_prime_v << F2_prime_v
+            F2_prime_bit_out, F2_prime = SHL(F2_prime, Wire(0,1))
+            _, F1_prime = SHL(F1_prime, F2_prime_bit_out)
             E_ -= 1
-            F1_prime = Wire(0,1)
-            F2_prime = Wire(0, 1) # todo : check for more info
-            for i in range(f,1,-1):
-                F1_prime_v >> F1_prime
-                F2_prime_v << F2_prime
-                a = FloatSquare(a)
-                a_prime = FloatSqrt(a_prime)
-                if F1_prime == 1:
-                    q = FloatMul(q,a)
-                if F2_prime == 1:
-                    q = FloatMul(q,a_prime)
+
+        for i in range(f,1,-1):
+            f1, F1_prime = SHR(F1_prime, Wire(0,1))
+            f2, F2_prime = SHL(F2_prime, f1)
+
+            if f1.value == 1:
+                q = FloatMul(q,a)
+            a = FloatSquare(a)
+
+            a_prime = FloatSqrt(a_prime)
+            if f2.value == 1:
+                q = FloatMul(q,a_prime)
 
     return q
 
@@ -377,7 +390,7 @@ a = Wire(0b1011, 4)
 b = Wire(0b0101, 4)
 print(f'{a = }')
 print(f'{a[-4] = }')
-print(f'{a[0:3] = }')
+print(f'{a[:3] = }')
 print(f'{a - b = }')  # 5
 print(f'{a + b = }')  # 15
 print(f'{a.concat(b) = }')  # 0b10100101
@@ -466,3 +479,20 @@ do_clock()
 print('Clock()')
 print(f'{a.value = }')
 print(f'{b.value = }')
+
+# Test mainAlgorithm
+# 1.35 ^ 24.0
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+b = FloatWire(0b01000001110000000000000000000000) # 24.0
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+ans = mainAlgorithm(a, b)
+print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+
+# 1.35 ^ 1.5
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+b = FloatWire(0b00111111110000000000000000000000) # 1.5
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+ans = mainAlgorithm(a, b)
+print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
