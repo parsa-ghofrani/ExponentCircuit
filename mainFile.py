@@ -496,3 +496,20 @@ print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 ans = mainAlgorithm(a, b)
 print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+
+# Test mainAlgorithm
+# 1.35 ^ 24.0
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+b = FloatWire(0b01000001110000000000000000000000) # 24.0
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+ans = mainAlgorithm(a, b)
+print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+
+# 1.35 ^ 1.5
+a = FloatWire(0b00111111101011001100110011001101) # 1.35
+b = FloatWire(0b00111111110000000000000000000000) # 1.5
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+ans = mainAlgorithm(a, b)
+print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
