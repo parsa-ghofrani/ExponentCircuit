@@ -28,7 +28,7 @@ class Wire:
             return Wire((self.value >> key) & 1, 1)
         elif isinstance(key, slice): # TODO: implement slice for negative values
             start = key.start or 0
-            stop = key.stop or (self.bit_count + 1)
+            stop = key.stop or self.bit_count
             if start < 0:
                 start += self.bit_count
             if stop < 0:
@@ -92,10 +92,20 @@ class Wire:
     def __repr__(self):
         return f"0b{self.value:0{self.bit_count}b}"
     
+    def twos_complement_value(self):
+        return self.value - (1 << self.bit_count) if self.value & (1 << (self.bit_count - 1)) else self.value
+    
+    def bias_value(self):
+        return self.value - 127
+    
     def __add__(self, other):
         a = self
         b = other if isinstance(other, Wire) else Wire(other, a.bit_count)
         n = max(a.bit_count, b.bit_count)
+        if a.bit_count < b.bit_count:
+            a = Wire(0, b.bit_count - a.bit_count) // a
+        elif b.bit_count < a.bit_count:
+            b = Wire(0, a.bit_count - b.bit_count) // b
         result = Wire(0, n)
         carry = Wire(0, 1)
 
@@ -155,9 +165,8 @@ class Wire:
         return Wire(1, 1)
     
     def SAR(self):
-        is_negative = self[-1]
         result = self[-1] // self
-        return result >> 1
+        return result[1:]
     
 class FloatWire(Wire):
     f: int
@@ -190,7 +199,7 @@ class FloatWire(Wire):
     
     def to_float(self):
         sign = (-1) ** self.sign().value
-        exponent = (self.exponent() - self.bias)[1].value
+        exponent = (self.exponent() - self.bias)[1].twos_complement_value()
         fraction = 1 + self.fraction().value / (1 << self.f)
         return sign * fraction * 2 ** exponent
 
@@ -285,7 +294,8 @@ def FloatSqrt(input: FloatWire) -> FloatWire:
     F_prime = MUX([FracSqrt(MUX([Wire(0b01,2)//F,Wire(1,1)//F//Wire(0,1)],twos_complement_E[0])),Wire(0,f+2)],is_zero)[1:-1]
     E_prime = MUX([(twos_complement_E.SAR()+bias)[1],Wire(0,e)],is_zero)
 
-    return FloatWire((Wire(0,1) // E_prime // F_prime).value, e, f, bias)
+    result = FloatWire((S // E_prime // F_prime).value, e, f, bias)
+    return result
 
 def IntMul(a: Wire, b: Wire) -> Wire:
     n = a.bit_count
@@ -333,6 +343,8 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
     E_b = b.exponent()
     F_b = b.fraction()
 
+    real_F = Wire(1,1) // F_b
+
     q = FloatWire((Wire(0,1)//bias//Wire(0, f)).value)# todo : bit//bias//vector
 
     E_ = E_b.value - bias.value
@@ -340,21 +352,20 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
         while E_ < 0:
             a = FloatSqrt(a)
             E_ += 1
-            q = FloatMul(a, q) # todo : check this with parsa to see if it is correct (pseudocode wasn't complete)
+        for _ in range(f + 1):
+            F_output, real_F = SHL(real_F, Wire(0,1))
+            a = FloatSqrt(a)
+            if F_output.value == 1:
+                q = FloatMul(q, a)
     elif  E_ > f:
         while E_> f:
-            a = FloatSqrt(a)
+            a = FloatSquare(a)
             E_ -= 1
-
-        F_reverse = F_b.reverse()
-        for i in F_reverse.digits : # todo : define a function for traversing digits of a given wire
-            a = FloatSqrt(a)
-            q = FloatMul(a, q)
-            if i == 1:
-                q = FloatMul(q, q)
-
-        a = FloatSqrt(a)
-        q = FloatMul(q, q)
+        for _ in range(f + 1):
+            F_output, real_F = SHR(real_F, Wire(0,1))
+            if F_output.value == 1:
+                q = FloatMul(q, a)
+            a = FloatSquare(a)
 
     else:
         a_prime: FloatWire
@@ -486,16 +497,16 @@ a = FloatWire(0b00111111101011001100110011001101) # 1.35
 b = FloatWire(0b01000001110000000000000000000000) # 24.0
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
-ans = mainAlgorithm(a, b)
-print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# ans = mainAlgorithm(a, b)
+# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
 
 # 1.35 ^ 1.5
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
 b = FloatWire(0b00111111110000000000000000000000) # 1.5
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
-ans = mainAlgorithm(a, b)
-print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# ans = mainAlgorithm(a, b)
+# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
 
 # Test mainAlgorithm
 # 1.35 ^ 24.0
@@ -503,12 +514,30 @@ a = FloatWire(0b00111111101011001100110011001101) # 1.35
 b = FloatWire(0b01000001110000000000000000000000) # 24.0
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
-ans = mainAlgorithm(a, b)
-print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# ans = mainAlgorithm(a, b)
+# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
 
 # 1.35 ^ 1.5
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
 b = FloatWire(0b00111111110000000000000000000000) # 1.5
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+# ans = mainAlgorithm(a, b)
+# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+
+# (2^128) ^ (2^-24)
+a = FloatWire(0b01111111011111111111111111111111) # 1.999... * 2^127
+b = FloatWire(0b00110011100000000000000000000001) # 2^-24
+print(f'{a.to_float() = }')
+print(f'{b.to_float() = }')
+print(f'a.exponent = {(a.exponent() - a.bias)[1].twos_complement_value()}')
+print(f'b.exponent = {(b.exponent() - b.bias)[1].twos_complement_value()}')
+ans = mainAlgorithm(a, b)
+print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+
+# 1.5 ^ 2^24
+a = FloatWire(0b00111111100000000000000000000001) # 1.00001
+b = FloatWire(0b01001011100000000000000000000000) # 2^24
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 ans = mainAlgorithm(a, b)
