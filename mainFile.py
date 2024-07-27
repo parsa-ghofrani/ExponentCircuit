@@ -230,6 +230,9 @@ class Register:
     def set_new_value(self):
         self.new_value = self.data_function()
 
+    def set_new_value(self, new_value):
+        self.new_value = new_value
+
     def set_new_load(self):
         self.load = self.load_function()
     
@@ -326,6 +329,11 @@ def SHL(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
     result = wire // input_bit
     return result[-1], result[:-1]
 
+def SHL_two_wires(wire1: Wire, wire2: Wire) -> tuple[Wire, Wire]:
+    w2_out_bit, wire2 = SHL(wire2, Wire(0,1))
+    _, wire1 = SHL(wire1, w2_out_bit)
+    return wire1, wire2
+
 def SHR(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
     result = input_bit // wire
     return result[0], result[1:]
@@ -377,8 +385,9 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
         F2_prime = deepcopy(F_b)
         while E_ > 0:
             # F1_prime_v << F2_prime_v
-            F2_prime_bit_out, F2_prime = SHL(F2_prime, Wire(0,1))
-            _, F1_prime = SHL(F1_prime, F2_prime_bit_out)
+            # F2_prime_bit_out, F2_prime = SHL(F2_prime, Wire(0,1))
+            # _, F1_prime = SHL(F1_prime, F2_prime_bit_out)
+            F1_prime, F2_prime = SHL_two_wires(F1_prime, F2_prime)
             E_ -= 1
 
         for i in range(f,1,-1):
@@ -394,6 +403,70 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
                 q = FloatMul(q,a_prime)
 
     return q
+
+def main_algorithm_RTL(a_in : FloatWire , b_in : FloatWire) -> FloatWire:
+    e = a_in.e
+    f = a_in.f
+    bias = a_in.bias
+
+    a = Register(FloatWire(0), None, None)
+    S = Register(Wire(0,1), None, None)
+    E = Register(Wire(0,e), None, None)
+    F = Register(Wire(0,f), None, None)
+    a_prime = Register(FloatWire(0), None, None)
+    q = Register(FloatWire(0), None, None)
+    End = Register(Wire(0,1), None, None)
+    F1 = Register(Wire(0,f), None, None)
+    F2 = Register(Wire(0,f), None, None)
+    i = Register(Wire(0,1), None, None)
+    j = Register(Wire(0,1), None, None)
+    SC = Register(0, None, None)
+    SC_1x = Register(0, None, None)
+    RR = Register(FloatWire(0), None, None)
+    ShiftCtrl = Register(Wire(0,1), None, None)
+    MultiplyCtrl = Register(Wire(0,1), None, None)
+    RecCtrl = Register(Wire(0,1), None, None)
+    E_l0 = Register(Wire(0,1), None, None) # E < 0
+    E_gf = Register(Wire(0,1), None, None) # E > f
+
+    a_LD = Wire(1,1)
+    b_LD = Wire(1,1)
+    Start = Wire(1,1)
+
+    cycle = 0
+    while(End.value == 0):
+        if cycle > 0:
+            a_LD.value = 0
+            b_LD.value = 0
+        
+        # actual RTL
+        if a_LD.value == 1: a.set_new_value(a_in)
+        if b_LD.value == 1: b.set_new_value(b_in)
+        if a_LD.value == 1: a_prime.set_new_value(a_in)
+        if Start.value == 1: 
+            End.set_new_value(Wire(0,1))
+            q.set_new_value(Wire(0,1)//bias//Wire(0,f))
+            E_l0.new_value, E.new_value = E.value - bias
+            E_gf.new_value, _ = f - (E.value - bias)[1]
+            F1.set_new_value(Wire(1,f))
+            F2.set_new_value(F.value)
+            i.set_new_value(Wire(0,1))
+            j.set_new_value(Wire(0,1))
+            ShiftCtrl.set_new_value(Wire(1,1))
+            MultiplyCtrl.set_new_value(Wire(0,1))
+            RecCtrl.set_new_value(Wire(0,1))
+        if ShiftCtrl.value == 1:
+            if E_l0.value == 1: a.set_new_value(FloatSqrt(a.value))
+            if E_gf.value == 1: a.set_new_value(FloatSquare(a.value))
+            if (~E_l0.value & ~E_gf.value).value == 1:
+                F1.new_value, F2.new_value = SHL_two_wires(F1.value, F2.value)
+            if E_gf.value == 0: E.new_value = E.value - 1
+            if E_gf.value == 1: E.new_value = E.value + 1
+
+
+        if Start.value == 1:
+            Start.value = 0
+        cycle += 1
 
 
 # Test cases
