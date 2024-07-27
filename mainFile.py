@@ -206,7 +206,7 @@ class FloatWire(Wire):
 registers = []
 def do_clock():
     for register in registers:
-        register.set_new_value()
+        register.update_new_value()
         register.set_new_load()
     for register in registers:
         register.update_value()
@@ -227,7 +227,7 @@ class Register:
         registers.append(self)
         self.load = Wire(0,0)
     
-    def set_new_value(self):
+    def update_new_value(self):
         self.new_value = self.data_function()
 
     def set_new_value(self, new_value):
@@ -244,6 +244,11 @@ class Register:
 
 
 
+def concat(wires: list[Wire]) -> Wire:
+    result = wires[0]
+    for wire in wires[1:]:
+        result = result // wire
+    return result
 
 def MUX(data_lines: list[Wire], select_lines: Wire) -> Wire:
     n = len(data_lines)
@@ -282,7 +287,9 @@ def IntSqrt(input: Wire) -> Wire:
 def FracSqrt(input: Wire) -> Wire:
     return IntSqrt(input // Wire(0, input.bit_count))
 
-def FloatSqrt(input: FloatWire) -> FloatWire:
+# returns: U, result
+# U: underflow
+def FloatSqrt(input: FloatWire) -> tuple[Wire, FloatWire]:
     S = input.sign()
     E = input.exponent()
     F = input.fraction()
@@ -298,7 +305,8 @@ def FloatSqrt(input: FloatWire) -> FloatWire:
     E_prime = MUX([(twos_complement_E.SAR()+bias)[1],Wire(0,e)],is_zero)
 
     result = FloatWire((S // E_prime // F_prime).value, e, f, bias)
-    return result
+    U = F_prime.multi_bit_nor() & Wire(1 if E_prime.value == bias else 0, 1)
+    return U, result
 
 def IntMul(a: Wire, b: Wire) -> Wire:
     n = a.bit_count
@@ -309,7 +317,10 @@ def IntMul(a: Wire, b: Wire) -> Wire:
             output = (output + ((a[i] & b[j]) << (i + j)))[1]
     return output
 
-def FloatMul(a: FloatWire, b: FloatWire) -> FloatWire:
+# returns: O , U , a*b
+# O: overflow
+# U: underflow
+def FloatMul(a: FloatWire, b: FloatWire) -> tuple[Wire, Wire, FloatWire]:
     S = a.sign() ^ b.sign()
     bias = a.bias
     f = a.f
@@ -317,12 +328,23 @@ def FloatMul(a: FloatWire, b: FloatWire) -> FloatWire:
     mul = (Wire(1,1) // a.fraction()) * (Wire(1,1) // b.fraction())
     is_F_bigger_than_2 = mul[-1]
 
-    E = (((a.exponent() - bias)[1] + b.exponent())[1] + is_F_bigger_than_2)[1]
+    E1 = concat(a.exponent() + b.exponent())
+    U, E2 = E1 - bias
+
+    C, E3 = E2 + is_F_bigger_than_2
+
+    O = (E3[-1] | C) & ~U
+
+    # E = (((a.exponent() - bias)[1] + b.exponent())[1] + is_F_bigger_than_2)[1]
+    E = E3[:-1]
     F = MUX([mul[f:-2], mul[f+1:-1]], is_F_bigger_than_2)
 
-    return FloatWire((S // E // F).value, a.e, a.f, a.bias)
+    return O, U, FloatWire((S // E // F).value, a.e, a.f, a.bias)
 
-def FloatSquare(a: FloatWire) -> FloatWire:
+# returns: O , U , a^2
+# O: overflow
+# U: underflow
+def FloatSquare(a: FloatWire) -> tuple[Wire, Wire, FloatWire]:
     return FloatMul(a,a)
 
 def SHL(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
@@ -339,8 +361,10 @@ def SHR(wire: Wire, input_bit: Wire) -> tuple[Wire, Wire]:
     return result[0], result[1:]
 
 
-
-def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
+# returns: O , U , a^b
+# O: overflow
+# U: underflow
+def mainAlgorithm(a : FloatWire , b : FloatWire) -> tuple[Wire, Wire, FloatWire]:
     S_a = a.sign()
     E_a = a.exponent()
     F_a = a.fraction()
@@ -351,6 +375,9 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
     E_b = b.exponent()
     F_b = b.fraction()
 
+    O = Wire(0,1)
+    U = Wire(0,1)
+
     real_F = Wire(1,1) // F_b
 
     q = FloatWire((Wire(0,1)//bias//Wire(0, f)).value)# todo : bit//bias//vector
@@ -358,22 +385,47 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
     E_ = E_b.value - bias.value
     if E_ < 0:
         while E_ < 0:
-            a = FloatSqrt(a)
+            u, a = FloatSqrt(a)
             E_ += 1
+            if u.value == 1:
+                E_ = 0
         for _ in range(f + 1):
             F_output, real_F = SHL(real_F, Wire(0,1))
-            a = FloatSqrt(a)
+            u, a = FloatSqrt(a)
+            if u.value == 1:
+                U = Wire(1,1)
+                break
             if F_output.value == 1:
-                q = FloatMul(q, a)
+                o, u, q = FloatMul(q, a)
+                if o.value == 1:
+                    O = Wire(1,1)
+                    break
+                if u.value == 1:
+                    U = Wire(1,1)
+                    break
     elif  E_ > f:
         while E_> f:
-            a = FloatSquare(a)
+            o, u, a = FloatSquare(a)
             E_ -= 1
+            if o.value == 1 or u.value == 1:
+                E = f
         for _ in range(f + 1):
             F_output, real_F = SHR(real_F, Wire(0,1))
             if F_output.value == 1:
-                q = FloatMul(q, a)
-            a = FloatSquare(a)
+                o, u, q = FloatMul(q, a)
+                if o.value == 1:
+                    O = Wire(1,1)
+                    break
+                if u.value == 1:
+                    U = Wire(1,1)
+                    break
+            o, u, a = FloatSquare(a)
+            if o.value == 1:
+                O = Wire(1,1)
+                break
+            if u.value == 1:
+                U = Wire(1,1)
+                break
 
     else:
         a_prime: FloatWire
@@ -395,14 +447,38 @@ def mainAlgorithm(a : FloatWire , b : FloatWire) -> FloatWire:
             f2, F2_prime = SHL(F2_prime, f1)
 
             if f1.value == 1:
-                q = FloatMul(q,a)
-            a = FloatSquare(a)
+                o, u, q = FloatMul(q,a)
+                if o.value == 1:
+                    O = Wire(1,1)
+                    break
+                if u.value == 1:
+                    U = Wire(1,1)
+                    break
+            o, u, a = FloatSquare(a)
+            if o.value == 1:
+                O = Wire(1,1)
+                break
+            if u.value == 1:
+                U = Wire(1,1)
+                break
 
-            a_prime = FloatSqrt(a_prime)
+            o, u, a_prime = FloatSqrt(a_prime)
+            if o.value == 1:
+                O = Wire(1,1)
+                break
+            if u.value == 1:
+                U = Wire(1,1)
+                break
             if f2.value == 1:
-                q = FloatMul(q,a_prime)
+                o, u, q = FloatMul(q,a_prime)
+                if o.value == 1:
+                    O = Wire(1,1)
+                    break
+                if u.value == 1:
+                    U = Wire(1,1)
+                    break
 
-    return q
+    return O, U, q
 
 def main_algorithm_RTL(a_in : FloatWire , b_in : FloatWire) -> FloatWire:
     e = a_in.e
@@ -524,19 +600,19 @@ print(f'{Wire(0b1010, 4).SAR() = }\n')  # 0b0101
 
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
 print(f'{a = } = {a.to_float()}')
-print(f'{FloatSqrt(a) = } = {FloatSqrt(a).to_float()}\n')  # 1.16
+print(f'{FloatSqrt(a) = } = {FloatSqrt(a)[1].to_float()}\n')  # 1.16
 
 b = FloatWire(0b01000001100000000000000000000000) # 16.0
 print(f'{b = } = {b.to_float()}')
-print(f'{FloatSqrt(b) = } = {FloatSqrt(b).to_float()}\n')  # 4.0
+print(f'{FloatSqrt(b) = } = {FloatSqrt(b)[1].to_float()}\n')  # 4.0
 
 c = FloatWire(0b00111111100000000000000000000000) # 1.0
 print(f'{c = } = {c.to_float()}')
-print(f'{FloatSqrt(c) = } = {FloatSqrt(c).to_float()}\n')  # 1.0
+print(f'{FloatSqrt(c) = } = {FloatSqrt(c)[1].to_float()}\n')  # 1.0
 
 d = FloatWire(0b01000000000000000000000000000000) # 2.0
 print(f'{d = } = {d.to_float()}')
-print(f'{FloatSqrt(d) = } = {FloatSqrt(d).to_float()}\n')  # 1.41
+print(f'{FloatSqrt(d) = } = {FloatSqrt(d)[1].to_float()}\n')  # 1.41
 
 a = Wire(0b1011, 4)
 b = Wire(0b0101, 4)
@@ -544,10 +620,10 @@ print(f'{IntMul(a, b) = }\n') # 0b00110111
 
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
 b = FloatWire(0b01000001100000000000000000000000) # 16.0
-print(f'{FloatMul(a, b) = } = {FloatMul(a, b).to_float()}\n') # 0b00111111101011001100110011001101
+print(f'{FloatMul(a, b) = } = {FloatMul(a, b)[2].to_float()}\n') # 0b00111111101011001100110011001101
 
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
-print(f'{FloatSquare(a) = } = {FloatSquare(a).to_float()}') # 1.8224999999999998
+print(f'{FloatSquare(a) = } = {FloatSquare(a)[2].to_float()}') # 1.8224999999999998
 
 
 # Test Registers
@@ -571,7 +647,7 @@ b = FloatWire(0b01000001110000000000000000000000) # 24.0
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 # ans = mainAlgorithm(a, b)
-# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
 
 # 1.35 ^ 1.5
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
@@ -579,7 +655,7 @@ b = FloatWire(0b00111111110000000000000000000000) # 1.5
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 # ans = mainAlgorithm(a, b)
-# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
 
 # Test mainAlgorithm
 # 1.35 ^ 24.0
@@ -588,7 +664,7 @@ b = FloatWire(0b01000001110000000000000000000000) # 24.0
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 # ans = mainAlgorithm(a, b)
-# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
 
 # 1.35 ^ 1.5
 a = FloatWire(0b00111111101011001100110011001101) # 1.35
@@ -596,7 +672,7 @@ b = FloatWire(0b00111111110000000000000000000000) # 1.5
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 # ans = mainAlgorithm(a, b)
-# print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+# print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
 
 # (2^128) ^ (2^-24)
 a = FloatWire(0b01111111011111111111111111111111) # 1.999... * 2^127
@@ -606,7 +682,7 @@ print(f'{b.to_float() = }')
 print(f'a.exponent = {(a.exponent() - a.bias)[1].twos_complement_value()}')
 print(f'b.exponent = {(b.exponent() - b.bias)[1].twos_complement_value()}')
 ans = mainAlgorithm(a, b)
-print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
 
 # 1.5 ^ 2^24
 a = FloatWire(0b00111111100000000000000000000001) # 1.00001
@@ -614,4 +690,4 @@ b = FloatWire(0b01001011100000000000000000000000) # 2^24
 print(f'{a.to_float() = }')
 print(f'{b.to_float() = }')
 ans = mainAlgorithm(a, b)
-print(f'mainAlgorithm(a, b) = {ans} = {ans.to_float()}')
+print(f'mainAlgorithm(a, b) = {ans} = {ans[2].to_float()}')
